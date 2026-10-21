@@ -4280,7 +4280,7 @@ function saStatusBarHtml(a, adminWallet, ticketBlocked, lib){
     it('Balance', '\u20b9' + (aw.balance || 0), (aw.balance || 0) < 0 ? 'bad' : (aw.balance || 0) < 500 ? 'warn' : 'ok');
     it('Wallet setup', aw.setup && aw.setup.done ? 'Completed' : 'Pending', aw.setup && aw.setup.done ? 'ok' : 'warn');
     if (aw.ekycRequest && aw.ekycRequest.status === 'pending') it('eKYC', 'Re-verification pending', 'warn');
-    if (aw.videoEkycSchedule && aw.videoEkycSchedule.at) it('Video eKYC', 'Scheduled ' + new Date(aw.videoEkycSchedule.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }), 'info');
+    if (aw.videoEkycSchedule && aw.videoEkycSchedule.at && Date.now() > new Date(aw.videoEkycSchedule.at).getTime() + 600000) it('Video eKYC', 'Schedule missed', 'warn'); else if (aw.videoEkycSchedule && aw.videoEkycSchedule.at) it('Video eKYC', 'Scheduled ' + new Date(aw.videoEkycSchedule.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }), 'info');
     if (aw.reopenRequest && aw.reopenRequest.status === 'pending') it('Reopen request', 'Waiting for you', 'info');
     if (aw.closeFinalizeAt && ws === 'closing') it('Closure', 'Closes ' + new Date(aw.closeFinalizeAt).toLocaleDateString(), 'warn');
     const pc = ((adminWallet || {}).chargeRequests || []).filter(r => r.status === 'Pending').length;
