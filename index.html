@@ -1998,6 +1998,17 @@ function saRequestWalletRenewalCharge(adminId, amount, note, plan){
     wallet.chargeRequests = wallet.chargeRequests || [];
     wallet.chargeRequests.push(req);
     subSupersedePending(wallet);
+    subAutoAcceptPendingCore(wallet, saGenerateWalletTxnId);
+    // Auto-Renew is ON -> the Admin has pre-approved renewals, so this request is accepted automatically (no manual Accept needed).
+    if (wallet.subscription && wallet.subscription.autoRenew && plan) {
+        const txnId = saGenerateWalletTxnId(), nowIso = new Date().toISOString(), before = wallet.balance || 0;
+        wallet.balance = before - amount;
+        wallet.transactions = wallet.transactions || [];
+        wallet.transactions.push({ id: txnId, type: 'debit', chargeType: 'renewal', amount: amount, balanceAfter: wallet.balance, date: nowIso, note: (note ? note + ' \u2014 ' : '') + 'accepted automatically (Auto-Renew ON)' + (wallet.balance < 0 ? ' (balance went negative: wallet had \u20b9' + before + ' but the charge was \u20b9' + amount + ')' : ''), by: 'Super Admin', isSuperAdminCharge: true });
+        req.status = 'Approved'; req.decidedAt = nowIso; req.txnId = txnId; req.acceptedBy = 'Auto-Renew ON (automatic)'; req.autoAccepted = true;
+        subApplyTerm(wallet, plan, amount, txnId, true, false);
+        if (wallet.balance < 0) wallet.subscription.autoNegative = { kind: 'auto', date: nowIso, amount: amount, balanceBefore: before, balanceAfter: wallet.balance, planName: plan.name };
+    }
     data.wallet = wallet;
     saWriteLibrary(adminId, data);
     return req;
@@ -4467,13 +4478,18 @@ function subApplyTerm(w, plan, amount, txnId, auto, isAutoCharge){
     const end = new Date(start); if (plan.days > 0) end.setDate(end.getDate() + plan.days); else end.setMonth(end.getMonth() + plan.months); end.setDate(end.getDate() - 1); end.setHours(23, 59, 59, 999);
     const hist = (old && old.history) || [];
     hist.push({ planName: plan.name, months: plan.months, days: plan.days || 0, amount: amount, listPrice: plan.listPrice || plan.price, discName: plan.discName || '', discPct: plan.discPct || 0, date: now.toISOString(), txnId: txnId, periodStart: start.toISOString(), periodEnd: end.toISOString(), auto: !!isAutoCharge, forfeitedDays: mode.kind === 'change' ? mode.days : 0 });
-    w.subscription = { planId: plan.id, planName: plan.name, months: plan.months, days: plan.days || 0, price: plan.price || amount, autoRenew: !!auto, startedAt: stack ? (old.startedAt || start.toISOString()) : start.toISOString(), expiresAt: end.toISOString(), history: hist };
+    w.subscription = { planId: plan.id, planName: plan.name, months: plan.months, days: plan.days || 0, price: plan.price || amount, autoRenew: !!auto, startedAt: stack ? (old.startedAt || start.toISOString()) : start.toISOString(), expiresAt: end.toISOString(), history: hist, autoOnSince: auto ? now.toISOString() : null, lastAutoAt: (old && old.lastAutoAt) || null };
 }
 // Fully automatic renewal on the Next Renewal date (Auto-Renew ON). Uses the Super Admin's CURRENT plan definition (so plan edits apply),
 // may take the wallet negative (reason recorded), and needs an Active wallet.
 function subAutoRenewCore(w, genId){
     const s = w.subscription;
     if (!s || !s.autoRenew || !s.expiresAt || w.status !== 'active' || subDaysLeft(s.expiresAt) > 0) return false;
+    // Auto-Renew only counts if it was already ON when the plan reached its renewal date. Turning it ON AFTER the plan expired
+    // (e.g. after a renewal request was rejected) never charges instantly — it applies from the next renewal cycle.
+    if (s.autoOnSince && new Date(s.autoOnSince).getTime() > new Date(s.expiresAt).getTime()) return false;
+    // At most ONE automatic deduction per calendar day, so a missed/overdue plan can never be charged several times in a row.
+    if (s.lastAutoAt && new Date(s.lastAutoAt).toDateString() === new Date().toDateString()) return false;
     const lp = subLatestPlan(s.planId), plan = { id: s.planId, name: lp ? lp.name : s.planName, months: lp ? lp.months : s.months, days: lp ? lp.days : s.days, price: subPlanNet(lp || { price: s.price }).net, listPrice: lp ? lp.price : s.price, discName: (lp && lp.discPct > 0) ? lp.discName : '', discPct: (lp && lp.discPct > 0) ? lp.discPct : 0 };
     if (!(plan.price > 0)) return false;
     const nowIso = new Date().toISOString(), txnId = genId(), before = w.balance || 0;
@@ -4481,7 +4497,27 @@ function subAutoRenewCore(w, genId){
     w.transactions = w.transactions || [];
     w.transactions.push({ id: txnId, type: 'debit', chargeType: 'renewal', amount: plan.price, balanceAfter: w.balance, date: nowIso, note: 'Auto-renewal — ' + plan.name + ' plan' + (neg ? ' (balance went negative: wallet had ₹' + before + ' but the charge was ₹' + plan.price + ')' : ''), by: 'Auto-Renew', isSuperAdminCharge: true, negativeBalance: neg });
     subApplyTerm(w, plan, plan.price, txnId, true, true);
+    w.subscription.autoOnSince = s.autoOnSince || null; w.subscription.lastAutoAt = nowIso;
     if (neg) w.subscription.autoNegative = { kind: 'auto', date: nowIso, amount: plan.price, balanceBefore: before, balanceAfter: w.balance, planName: plan.name };
+    return true;
+}
+// Auto-Renew ON: a renewal request sent by the Super Admin (manually) is accepted automatically — the fee is deducted from the wallet
+// with no Accept/Reject needed. (With Auto-Renew OFF the Admin must accept manually.)
+function subAutoAcceptPendingCore(w, genId){
+    const s = w.subscription;
+    if (!s || !s.autoRenew || w.status !== 'active') return false;
+    const req = (w.chargeRequests || []).filter(r => r.status === 'Pending' && r.type === 'renewal' && r.plan).sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt))[0];
+    if (!req) return false;
+    const nowIso = new Date().toISOString(), txnId = genId(), before = w.balance || 0;
+    w.balance = before - req.amount; const neg = w.balance < 0;
+    w.transactions = w.transactions || [];
+    w.transactions.push({ id: txnId, type: 'debit', chargeType: 'renewal', amount: req.amount, balanceAfter: w.balance, date: nowIso, note: (req.note ? req.note + ' — ' : '') + 'Auto-accepted (Auto-Renew ON)' + (neg ? ' (balance went negative: wallet had \u20b9' + before + ' but the charge was \u20b9' + req.amount + ')' : ''), by: 'Super Admin', isSuperAdminCharge: true });
+    req.status = 'Approved'; req.decidedAt = nowIso; req.txnId = txnId; req.auto = true; req.acceptedBy = 'System (Auto-Renew ON)';
+    w.chargeRequests.forEach(r => { if (r !== req && r.status === 'Pending' && r.type === 'renewal') { r.status = 'Rejected'; r.decidedAt = nowIso; r.decisionReason = 'Replaced automatically by a newer renewal request'; r.superseded = true; } });
+    const keepOn = s.autoOnSince || null;
+    subApplyTerm(w, req.plan, req.amount, txnId, true, true);
+    w.subscription.autoOnSince = keepOn; w.subscription.lastAutoAt = nowIso;
+    if (neg) w.subscription.autoNegative = { kind: 'auto', date: nowIso, amount: req.amount, balanceBefore: before, balanceAfter: w.balance, planName: req.plan.name };
     return true;
 }
 // Auto-SEND: Auto-Renew OFF -> on the Next Renewal date the system itself raises the renewal request to the Admin (no manual sending needed).
@@ -4523,8 +4559,8 @@ function saRunAutoRenewals(){
         try {
             const data = saReadLibrary(a.id); if (!data || !data.wallet || !data.wallet.subscription) return;
             const w = saEnsureWalletShape(data.wallet);
-            const r1 = subAutoRenewCore(w, saGenerateWalletTxnId), r2 = subAutoRequestCore(w);
-            if (r1 || r2) { data.wallet = w; saWriteLibrary(a.id, data); }
+            const r0 = subAutoAcceptPendingCore(w, saGenerateWalletTxnId), r1 = subAutoRenewCore(w, saGenerateWalletTxnId), r2 = subAutoRequestCore(w);
+            if (r0 || r1 || r2) { data.wallet = w; saWriteLibrary(a.id, data); }
         } catch (e) {}
     });
 }
@@ -4666,8 +4702,8 @@ function saConfirmChargeModal(){
             alert('✅ Cash payment of ₹' + amount + ' recorded. The ' + snap.name + ' plan is active.\nReceipt / Txn ID: ' + rc.txnId);
         } else if (_saChargeType === 'renewal') {
             if (!saSelectedPlanSnapshot() && !confirm('No plan is selected. Send an amount-only renewal request? (No subscription will be activated.)')) return;
-            saRequestWalletRenewalCharge(_saWalletAdminId, amount, note, saSelectedPlanSnapshot());
-            alert('✅ Renewal charge request of ₹' + amount + ' sent to the Admin for approval.');
+            const rr = saRequestWalletRenewalCharge(_saWalletAdminId, amount, note, saSelectedPlanSnapshot());
+            alert(rr && rr.autoAccepted ? '✅ Auto-Renew is ON for this Admin, so the renewal charge of ₹' + amount + ' was accepted automatically and deducted from the wallet.\nTransaction ID: ' + rr.txnId : '✅ Renewal charge request of ₹' + amount + ' sent to the Admin for approval.');
         } else {
             const result = saDeductWalletCharge(_saWalletAdminId, amount, _saChargeType, note);
             alert('✅ ₹' + amount + ' deducted (' + _saChargeType + ').\nTransaction ID: ' + result.txnId + '\nNew Balance: ₹' + result.newBalance);
