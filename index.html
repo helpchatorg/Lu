@@ -7201,6 +7201,37 @@ window.addEventListener('storage', function (e) {
         if (typeof saRenderAdminsPanel === 'function') saRenderAdminsPanel();
     }
 });
+
+// ===== Search bars for wallet / subscription / log lists (filters the rows already on screen; re-applies after every refresh) =====
+function wlSetupSearch(hostId, rowSel, placeholder){
+    const host = document.getElementById(hostId); if (!host || host.dataset.wlSearch) return;
+    host.dataset.wlSearch = '1';
+    const wrap = document.createElement('div'); wrap.style.cssText = 'margin:0 0 8px;';
+    wrap.innerHTML = '<input type="search" autocomplete="off" placeholder="' + placeholder + '" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:0.78rem;background:#fff;color:#0f172a;margin:0;">' +
+        '<div class="wl-none" style="display:none;text-align:center;color:#64748b;font-size:0.74rem;padding:8px 0 2px;">No matching records found.</div>';
+    host.parentNode.insertBefore(wrap, host);
+    const inp = wrap.querySelector('input'), none = wrap.querySelector('.wl-none');
+    let busy = false;
+    const apply = () => {
+        if (busy) return; busy = true;
+        const q = inp.value.trim().toLowerCase(); let shown = 0, total = 0;
+        host.querySelectorAll(rowSel).forEach(r => { total++; const m = !q || r.textContent.toLowerCase().includes(q); r.style.display = m ? '' : 'none'; if (m) shown++; });
+        host.querySelectorAll('.wallet-epoch-divider').forEach(d => { d.style.display = q ? 'none' : ''; });
+        none.style.display = (q && total && !shown) ? 'block' : 'none';
+        busy = false;
+    };
+    inp.addEventListener('input', apply);
+    new MutationObserver(apply).observe(host, { childList: true, subtree: true });
+}
+function wlInitSearchBars(){
+    wlSetupSearch('admin-wallet-tx-list', ':scope > div', '🔍 Search transactions (Txn ID, amount, date, note…)');
+    wlSetupSearch('admin-wallet-lock-history', '.wallet-history-row', '🔍 Search log (action, date, eKYC…)');
+    wlSetupSearch('admin-wallet-charge-requests', '.wallet-history-row', '🔍 Search subscription history (Txn ID, amount, date…)');
+    wlSetupSearch('sa-wallet-tx-list', ':scope > div:not(.wallet-epoch-divider)', '🔍 Search transactions (Txn ID, amount, date, note…)');
+    wlSetupSearch('sa-wallet-lock-history-panel', ':scope > div > div:not(.wallet-epoch-divider)', '🔍 Search log (action, date, eKYC…)');
+    wlSetupSearch('sa-wallet-charge-requests', ':scope > div', '🔍 Search subscription history (Txn ID, amount, date…)');
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wlInitSearchBars); else wlInitSearchBars();
 </script>
 
 </body>
