@@ -4663,11 +4663,13 @@ const SA_CHARGE_META = {
 };
 // Wallet states where nothing may be deducted from the wallet, yet a Cash renewal payment can still be recorded.
 function saCashOnlyStatus(st){ return st === 'deactivated' || st === 'closing'; }
+function saSetupPending(w){ return !(w && w.setup && w.setup.done); }
+function saCashOnlyWallet(w){ return saSetupPending(w) || saCashOnlyStatus(w.status); }
 function saOpenChargeModal(type){
     if (!_saWalletAdminId) return;
     const wallet = saGetWallet(_saWalletAdminId);
-    if (!(wallet.setup && wallet.setup.done)) { alert('❌ Not applicable — the Admin has not completed First-Time Wallet Setup & AI Video eKYC yet.'); return; }
-    if (type !== 'penalty' && wallet.status !== 'active' && !(type === 'renewal' && saCashOnlyStatus(wallet.status))) {
+    if (saSetupPending(wallet) && type !== 'renewal') { alert('❌ Not applicable — the Admin has not completed First-Time Wallet Setup & AI Video eKYC yet.'); return; }
+    if (type !== 'penalty' && wallet.status !== 'active' && !(type === 'renewal' && saCashOnlyWallet(wallet))) {
         alert('❌ ' + (wallet.status === 'deactivated' ? 'This wallet is ' + (wallet.status === 'deactivated' ? 'Deactivated' : wallet.status) + ' — Annual Maintenance charges and wallet-deduction renewal requests are blocked (a Cash renewal payment can still be recorded).' : 'This charge can only be applied while the wallet is Active.'));
         return;
     }
@@ -4690,11 +4692,11 @@ function saOpenChargeModal(type){
     btn.innerText = meta.btnLabel; btn.style.background = meta.color;
     saChargePlanUi(type);
     { // Deactivated wallet: nothing can be deducted from the wallet, so only the Cash option is available
-        const wb = document.querySelector('#sa-charge-paymode-wrap .sa-paymode[data-m="wallet"]'), deact = type === 'renewal' && saCashOnlyStatus(wallet.status);
+        const wb = document.querySelector('#sa-charge-paymode-wrap .sa-paymode[data-m="wallet"]'), deact = type === 'renewal' && saCashOnlyWallet(wallet);
         if (wb) { wb.disabled = deact; wb.style.opacity = deact ? '.4' : ''; wb.style.cursor = deact ? 'not-allowed' : ''; }
         let nt = document.getElementById('sa-paymode-deact-note');
         if (!nt && wb) { nt = document.createElement('div'); nt.id = 'sa-paymode-deact-note'; nt.style.cssText = 'font-size:0.66rem;color:#92400e;margin-top:6px;line-height:1.5;'; document.getElementById('sa-charge-paymode-wrap').appendChild(nt); }
-        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = wallet.status === 'closing' ? '🔒 Permanent closure is requested for this wallet — wallet deduction is blocked, so only a Cash payment can be recorded.' : '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
+        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = saSetupPending(wallet) && wallet.status !== 'closing' && wallet.status !== 'deactivated' ? '⏳ The Admin has not completed First-Time Wallet Setup & AI Video eKYC yet — wallet deduction is blocked, so only a Cash payment can be recorded.' : wallet.status === 'closing' ? '🔒 Permanent closure is requested for this wallet — wallet deduction is blocked, so only a Cash payment can be recorded.' : '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
         if (deact) saPickPayMode('cash');
     }
     document.getElementById('sa-charge-modal').style.display = 'flex';
@@ -4713,7 +4715,7 @@ function saConfirmChargeModal(){
     }
     if (_saChargeType === 'penalty' && !note) { document.getElementById('err-sa-charge-note').style.display = 'block'; return; }
     try {
-        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saCashOnlyStatus(saGetWallet(_saWalletAdminId).status)) { alert('❌ This wallet is ' + (saGetWallet(_saWalletAdminId).status === 'closing' ? 'under a Permanent Closure request' : 'Deactivated') + ' — only a Cash payment can be recorded.'); return; }
+        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saCashOnlyWallet(saGetWallet(_saWalletAdminId))) { alert('❌ ' + (saSetupPending(saGetWallet(_saWalletAdminId)) ? 'The Admin has not completed wallet setup & Video eKYC yet' : 'This wallet is ' + (saGetWallet(_saWalletAdminId).status === 'closing' ? 'under a Permanent Closure request' : 'Deactivated')) + ' — only a Cash payment can be recorded.'); return; }
         if (_saChargeType === 'renewal' && _saPayMode === 'cash') {
             const snap = saSelectedPlanSnapshot();
             if (!snap) { alert('❌ Select a subscription plan to record a cash payment.'); return; }
@@ -4777,9 +4779,9 @@ function renderSaSubModal(){
     const wallet = saGetWallet(_saWalletAdminId);
     saRenderSubPanel(wallet); saRenderWalletChargeRequests(wallet);
     const btn = document.getElementById('sa-charge-btn-renewal'), hint = document.getElementById('sa-sub-req-hint');
-    const setupDone = !!(wallet.setup && wallet.setup.done), ok = (wallet.status === 'active' || saCashOnlyStatus(wallet.status)) && setupDone;
+    const setupDone = !!(wallet.setup && wallet.setup.done), ok = (wallet.status === 'active' || saCashOnlyWallet(wallet));
     btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.45'; btn.style.cursor = ok ? 'pointer' : 'not-allowed';
-    hint.innerHTML = !setupDone ? '⛔ Not applicable: the Admin has not completed First-Time Wallet Setup &amp; AI Video eKYC yet.'
+    hint.innerHTML = (!setupDone && wallet.status === 'active') ? '⏳ The Admin has not completed First-Time Wallet Setup &amp; AI Video eKYC yet — only a <b>Cash</b> payment can be recorded (no wallet deduction).'
         : wallet.status === 'deactivated' ? '⏸ Wallet is Deactivated — renewal requests that deduct from the wallet are blocked until the Admin reactivates it. You can still record a <b>Cash</b> payment.'
         : wallet.status === 'closing' ? '🔒 Permanent closure is requested — renewal requests that deduct from the wallet are blocked. You can still record a <b>Cash</b> payment.'
         : wallet.status !== 'active' ? '⛔ Renewal requests cannot be sent while the wallet is ' + wallet.status + '.'
