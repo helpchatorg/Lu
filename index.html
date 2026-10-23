@@ -2042,6 +2042,9 @@ function saFreezeWallet(adminId, reason){
     if (wallet.status === 'frozen') {
         throw new Error('This wallet is already frozen.');
     }
+    if (wallet.status === 'deactivated') {
+        throw new Error('This wallet is Deactivated by the Admin, so it cannot be frozen until it is reactivated.');
+    }
     if (!reason || !reason.trim()) {
         throw new Error('A reason is required to freeze this wallet.');
     }
@@ -3770,6 +3773,11 @@ function saRenderFreezePanel(wallet){
         body.innerHTML = '<p style="font-size:0.74rem;color:var(--grey);margin:0;">Freezing isn\'t available while the wallet is closing or permanently closed.</p>';
         return;
     }
+    if (wallet.status === 'deactivated') {
+        body.innerHTML = '<p style="font-size:0.74rem;color:var(--grey);margin:0 0 10px;">⏸ The Admin has Deactivated this wallet, so Freeze is disabled. It becomes available again once the Admin reactivates the wallet.</p>' +
+            '<button disabled style="width:100%;background:#94a3b8;color:#fff;border:none;padding:11px;border-radius:10px;font-weight:800;font-size:0.8rem;cursor:not-allowed;opacity:.7;">🧊 Freeze Wallet (disabled while Deactivated)</button>';
+        return;
+    }
     if (wallet.status === 'frozen') {
         body.innerHTML =
             '<p style="font-size:0.76rem;color:#1e3a8a;margin:0 0 8px;">Frozen on ' + saFmtWalletDate(wallet.frozenAt) + '.</p>' +
@@ -3782,6 +3790,7 @@ function saRenderFreezePanel(wallet){
     }
 }
 function saOpenFreezeModal(){
+    { const _wd = _saWalletAdminId ? saGetWallet(_saWalletAdminId) : null; if (_wd && _wd.status === 'deactivated') { alert('❌ This wallet is Deactivated by the Admin, so Freeze is disabled until it is reactivated.'); return; } }
     { const _w = _saWalletAdminId ? saGetWallet(_saWalletAdminId) : null; if (_w && !(_w.setup && _w.setup.done)) { alert('❌ Freeze Control is disabled until the Admin completes First-Time Wallet Setup & AI Video eKYC.'); return; } }
     if (!_saWalletAdminId) return;
     document.getElementById('sa-freeze-reason').value = '';
@@ -4656,8 +4665,8 @@ function saOpenChargeModal(type){
     if (!_saWalletAdminId) return;
     const wallet = saGetWallet(_saWalletAdminId);
     if (!(wallet.setup && wallet.setup.done)) { alert('❌ Not applicable — the Admin has not completed First-Time Wallet Setup & AI Video eKYC yet.'); return; }
-    if (type !== 'penalty' && wallet.status !== 'active') {
-        alert('❌ ' + (wallet.status === 'deactivated' ? 'This wallet is Deactivated — Annual Maintenance and Renewal Charge requests are blocked until the Admin reactivates it.' : 'This charge can only be applied while the wallet is Active.'));
+    if (type !== 'penalty' && wallet.status !== 'active' && !(type === 'renewal' && wallet.status === 'deactivated')) {
+        alert('❌ ' + (wallet.status === 'deactivated' ? 'This wallet is Deactivated — Annual Maintenance charges and wallet-deduction renewal requests are blocked until the Admin reactivates it (a Cash renewal payment can still be recorded).' : 'This charge can only be applied while the wallet is Active.'));
         return;
     }
     if (type === 'penalty') {
@@ -4678,6 +4687,14 @@ function saOpenChargeModal(type){
     const btn = document.getElementById('sa-charge-confirm-btn');
     btn.innerText = meta.btnLabel; btn.style.background = meta.color;
     saChargePlanUi(type);
+    { // Deactivated wallet: nothing can be deducted from the wallet, so only the Cash option is available
+        const wb = document.querySelector('#sa-charge-paymode-wrap .sa-paymode[data-m="wallet"]'), deact = type === 'renewal' && wallet.status === 'deactivated';
+        if (wb) { wb.disabled = deact; wb.style.opacity = deact ? '.4' : ''; wb.style.cursor = deact ? 'not-allowed' : ''; }
+        let nt = document.getElementById('sa-paymode-deact-note');
+        if (!nt && wb) { nt = document.createElement('div'); nt.id = 'sa-paymode-deact-note'; nt.style.cssText = 'font-size:0.66rem;color:#92400e;margin-top:6px;line-height:1.5;'; document.getElementById('sa-charge-paymode-wrap').appendChild(nt); }
+        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
+        if (deact) saPickPayMode('cash');
+    }
     document.getElementById('sa-charge-modal').style.display = 'flex';
 }
 function saCloseChargeModal(){ document.getElementById('sa-charge-modal').style.display = 'none'; _saChargeType = null; }
@@ -4694,6 +4711,7 @@ function saConfirmChargeModal(){
     }
     if (_saChargeType === 'penalty' && !note) { document.getElementById('err-sa-charge-note').style.display = 'block'; return; }
     try {
+        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saGetWallet(_saWalletAdminId).status === 'deactivated') { alert('❌ This wallet is Deactivated — only a Cash payment can be recorded until the Admin reactivates it.'); return; }
         if (_saChargeType === 'renewal' && _saPayMode === 'cash') {
             const snap = saSelectedPlanSnapshot();
             if (!snap) { alert('❌ Select a subscription plan to record a cash payment.'); return; }
@@ -4757,10 +4775,10 @@ function renderSaSubModal(){
     const wallet = saGetWallet(_saWalletAdminId);
     saRenderSubPanel(wallet); saRenderWalletChargeRequests(wallet);
     const btn = document.getElementById('sa-charge-btn-renewal'), hint = document.getElementById('sa-sub-req-hint');
-    const setupDone = !!(wallet.setup && wallet.setup.done), ok = wallet.status === 'active' && setupDone;
+    const setupDone = !!(wallet.setup && wallet.setup.done), ok = (wallet.status === 'active' || wallet.status === 'deactivated') && setupDone;
     btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.45'; btn.style.cursor = ok ? 'pointer' : 'not-allowed';
     hint.innerHTML = !setupDone ? '⛔ Not applicable: the Admin has not completed First-Time Wallet Setup &amp; AI Video eKYC yet.'
-        : wallet.status === 'deactivated' ? '⏸ Wallet is Deactivated — renewal requests are blocked until the Admin reactivates it.'
+        : wallet.status === 'deactivated' ? '⏸ Wallet is Deactivated — renewal requests that deduct from the wallet are blocked until the Admin reactivates it. You can still record a <b>Cash</b> payment.'
         : wallet.status !== 'active' ? '⛔ Renewal requests cannot be sent while the wallet is ' + wallet.status + '.'
         : '<div style="line-height:1.6;"><b>Auto-Renewal OFF:</b> When Auto-Renewal is OFF, the Admin must manually accept the renewal request for the subscription to be renewed. Once the Admin accepts the request, the renewal fee is deducted from the Admin\'s wallet, and the subscription is activated or extended.<br><br><b>Auto-Renewal ON:</b> When Auto-Renewal is ON, the renewal fee is automatically deducted from the Admin\'s wallet on the renewal date, and the subscription is renewed without requiring any manual approval or request.<br><br>The system automatically sends up to 3 renewal requests on your behalf when the Admin\'s subscription expires.</div>'
 }
