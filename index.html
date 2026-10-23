@@ -4661,12 +4661,14 @@ const SA_CHARGE_META = {
     penalty:     { title: '⚠️ Apply Penalty', desc: 'This will be deducted immediately from the wallet. If the balance is insufficient it will go negative.', color: '#dc2626', btnLabel: 'Apply & Deduct Penalty', noteLabel: 'Reason for Penalty (required)', notePlaceholder: 'e.g. Late fee submission, policy violation' },
     renewal:     { title: '🔄 Request Subscription Renewal Charge', desc: 'This will be sent to the Admin as a request. The amount is deducted only if the Admin Accepts it.', color: '#0369a1', btnLabel: 'Send Renewal Request', noteLabel: 'Note (optional)', notePlaceholder: 'e.g. Annual subscription renewal — Sep 2026' }
 };
+// Wallet states where nothing may be deducted from the wallet, yet a Cash renewal payment can still be recorded.
+function saCashOnlyStatus(st){ return st === 'deactivated' || st === 'closing'; }
 function saOpenChargeModal(type){
     if (!_saWalletAdminId) return;
     const wallet = saGetWallet(_saWalletAdminId);
     if (!(wallet.setup && wallet.setup.done)) { alert('❌ Not applicable — the Admin has not completed First-Time Wallet Setup & AI Video eKYC yet.'); return; }
-    if (type !== 'penalty' && wallet.status !== 'active' && !(type === 'renewal' && wallet.status === 'deactivated')) {
-        alert('❌ ' + (wallet.status === 'deactivated' ? 'This wallet is Deactivated — Annual Maintenance charges and wallet-deduction renewal requests are blocked until the Admin reactivates it (a Cash renewal payment can still be recorded).' : 'This charge can only be applied while the wallet is Active.'));
+    if (type !== 'penalty' && wallet.status !== 'active' && !(type === 'renewal' && saCashOnlyStatus(wallet.status))) {
+        alert('❌ ' + (wallet.status === 'deactivated' ? 'This wallet is ' + (wallet.status === 'deactivated' ? 'Deactivated' : wallet.status) + ' — Annual Maintenance charges and wallet-deduction renewal requests are blocked (a Cash renewal payment can still be recorded).' : 'This charge can only be applied while the wallet is Active.'));
         return;
     }
     if (type === 'penalty') {
@@ -4688,11 +4690,11 @@ function saOpenChargeModal(type){
     btn.innerText = meta.btnLabel; btn.style.background = meta.color;
     saChargePlanUi(type);
     { // Deactivated wallet: nothing can be deducted from the wallet, so only the Cash option is available
-        const wb = document.querySelector('#sa-charge-paymode-wrap .sa-paymode[data-m="wallet"]'), deact = type === 'renewal' && wallet.status === 'deactivated';
+        const wb = document.querySelector('#sa-charge-paymode-wrap .sa-paymode[data-m="wallet"]'), deact = type === 'renewal' && saCashOnlyStatus(wallet.status);
         if (wb) { wb.disabled = deact; wb.style.opacity = deact ? '.4' : ''; wb.style.cursor = deact ? 'not-allowed' : ''; }
         let nt = document.getElementById('sa-paymode-deact-note');
         if (!nt && wb) { nt = document.createElement('div'); nt.id = 'sa-paymode-deact-note'; nt.style.cssText = 'font-size:0.66rem;color:#92400e;margin-top:6px;line-height:1.5;'; document.getElementById('sa-charge-paymode-wrap').appendChild(nt); }
-        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
+        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = wallet.status === 'closing' ? '🔒 Permanent closure is requested for this wallet — wallet deduction is blocked, so only a Cash payment can be recorded.' : '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
         if (deact) saPickPayMode('cash');
     }
     document.getElementById('sa-charge-modal').style.display = 'flex';
@@ -4711,7 +4713,7 @@ function saConfirmChargeModal(){
     }
     if (_saChargeType === 'penalty' && !note) { document.getElementById('err-sa-charge-note').style.display = 'block'; return; }
     try {
-        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saGetWallet(_saWalletAdminId).status === 'deactivated') { alert('❌ This wallet is Deactivated — only a Cash payment can be recorded until the Admin reactivates it.'); return; }
+        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saCashOnlyStatus(saGetWallet(_saWalletAdminId).status)) { alert('❌ This wallet is ' + (saGetWallet(_saWalletAdminId).status === 'closing' ? 'under a Permanent Closure request' : 'Deactivated') + ' — only a Cash payment can be recorded.'); return; }
         if (_saChargeType === 'renewal' && _saPayMode === 'cash') {
             const snap = saSelectedPlanSnapshot();
             if (!snap) { alert('❌ Select a subscription plan to record a cash payment.'); return; }
@@ -4775,10 +4777,11 @@ function renderSaSubModal(){
     const wallet = saGetWallet(_saWalletAdminId);
     saRenderSubPanel(wallet); saRenderWalletChargeRequests(wallet);
     const btn = document.getElementById('sa-charge-btn-renewal'), hint = document.getElementById('sa-sub-req-hint');
-    const setupDone = !!(wallet.setup && wallet.setup.done), ok = (wallet.status === 'active' || wallet.status === 'deactivated') && setupDone;
+    const setupDone = !!(wallet.setup && wallet.setup.done), ok = (wallet.status === 'active' || saCashOnlyStatus(wallet.status)) && setupDone;
     btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.45'; btn.style.cursor = ok ? 'pointer' : 'not-allowed';
     hint.innerHTML = !setupDone ? '⛔ Not applicable: the Admin has not completed First-Time Wallet Setup &amp; AI Video eKYC yet.'
         : wallet.status === 'deactivated' ? '⏸ Wallet is Deactivated — renewal requests that deduct from the wallet are blocked until the Admin reactivates it. You can still record a <b>Cash</b> payment.'
+        : wallet.status === 'closing' ? '🔒 Permanent closure is requested — renewal requests that deduct from the wallet are blocked. You can still record a <b>Cash</b> payment.'
         : wallet.status !== 'active' ? '⛔ Renewal requests cannot be sent while the wallet is ' + wallet.status + '.'
         : '<div style="line-height:1.6;"><b>Auto-Renewal OFF:</b> When Auto-Renewal is OFF, the Admin must manually accept the renewal request for the subscription to be renewed. Once the Admin accepts the request, the renewal fee is deducted from the Admin\'s wallet, and the subscription is activated or extended.<br><br><b>Auto-Renewal ON:</b> When Auto-Renewal is ON, the renewal fee is automatically deducted from the Admin\'s wallet on the renewal date, and the subscription is renewed without requiring any manual approval or request.<br><br>The system automatically sends up to 3 renewal requests on your behalf when the Admin\'s subscription expires.</div>'
 }
