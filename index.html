@@ -4538,12 +4538,12 @@ function subAutoRequestCore(w){
     if (s.autoRequestedFor !== s.expiresAt) { s.autoRequestedFor = s.expiresAt; s.autoSendCount = 0; s.autoSendLastDay = null; }
     const todayKey = new Date().toISOString().slice(0, 10);
     if ((s.autoSendCount || 0) >= 3 || s.autoSendLastDay === todayKey) return false;
-    if (w.chargeRequests.some(r => r.status === 'Pending' && r.plan && !r.autoSent)) return false;
+    // An earlier renewal request (auto or manual) that is still Pending is never replaced: no new automatic request is sent until it is accepted or rejected.
+    if (w.chargeRequests.some(r => r.status === 'Pending' && r.type === 'renewal')) return false;
     const lp = subLatestPlan(s.planId), plan = { id: s.planId, name: lp ? lp.name : s.planName, months: lp ? lp.months : s.months, days: lp ? lp.days : s.days, price: subPlanNet(lp || { price: s.price }).net, listPrice: lp ? lp.price : s.price, discName: (lp && lp.discPct > 0) ? lp.discName : '', discPct: (lp && lp.discPct > 0) ? lp.discPct : 0 };
     if (!(plan.price > 0)) return false;
     w.chargeRequests.push({ id: 'WCR' + Date.now() + Math.floor(Math.random() * 1000), type: 'renewal', amount: plan.price, note: 'Sent automatically by the system on the Next Renewal date (request ' + ((s.autoSendCount || 0) + 1) + ' of 3)', autoSeq: (s.autoSendCount || 0) + 1, status: 'Pending', requestedAt: new Date().toISOString(), decidedAt: null, decisionReason: null, plan: plan, autoSent: true });
     s.autoSendCount = (s.autoSendCount || 0) + 1; s.autoSendLastDay = todayKey;
-    if (typeof subSupersedePending === 'function') subSupersedePending(w);
     return true;
 }
 // Only the newest pending renewal request stays pending; older unaccepted ones are rejected automatically.
