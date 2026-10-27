@@ -4139,18 +4139,73 @@ function renderSaWalletModal(){
             : (t.isSuperAdminCharge || t.chargeType
                 ? ((chargeLabels[t.chargeType] || 'Charge deducted by Super Admin') + (t.note ? (' — ' + t.note) : ''))
                 : ('Seat ' + (t.seat != null ? t.seat : '—') + ' • ' + (t.shiftName || '') + (t.studentName ? (' — ' + t.studentName + (t.studentRegNo ? (' (' + t.studentRegNo + ')') : '')) : '')));
+        const rf = saRefundInfo(wallet, t);
+        const refundHtml = (t.refunds && t.refunds.length ? t.refunds.map(r => `<div style="font-size:0.68rem;color:#0f766e;font-weight:700;margin-top:4px;">↩ Refunded ₹${r.amount} — Refund Txn: <span style="font-family:monospace;">${r.txnId}</span></div>`).join('') : '') +
+            (rf.eligible ? `<button onclick="saOpenRefundModal('${t.id}')" style="margin:6px 0 0;width:auto;padding:3px 10px;font-size:0.62rem;border-radius:8px;background:#0d9488;">↩ Refund (${rf.daysLeft} day${rf.daysLeft === 1 ? '' : 's'} left)</button>` : '');
         return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                 <div style="font-size:0.68rem;color:var(--grey);font-weight:700;">${saFormatDate(t.date)} ${saFormatTime(t.date)}</div>
                 <div style="font-size:0.72rem;font-weight:800;color:${isCredit ? '#16a34a' : '#dc2626'};white-space:nowrap;">${isCredit ? '+' : '-'}₹${t.amount}</div>
             </div>
             <div style="font-size:0.8rem;color:var(--dark);font-weight:700;margin-top:4px;word-break:break-word;">${details}</div>
+            ${refundHtml}
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);">
                 <div style="font-size:0.65rem;font-family:monospace;color:var(--grey);word-break:break-all;">Txn: ${t.id}</div>
                 <div style="font-size:0.65rem;color:var(--grey);white-space:nowrap;">Bal: ₹${t.balanceAfter}</div>
             </div>
         </div>`;
     });
+}
+// ===== REFUND of a wrongly deducted Super-Admin charge (allowed for 5 days after the deduction) =====
+const SA_REFUND_DAYS = 5;
+function saRefundInfo(wallet, t){
+    const out = { eligible: false, refunded: 0, remaining: 0, daysLeft: 0 };
+    if (!t || t.type !== 'debit' || !t.isSuperAdminCharge || !t.chargeType || wallet.status === 'closed') return out;
+    out.refunded = (t.refunds || []).reduce((a, r) => a + (+r.amount || 0), 0);
+    out.remaining = Math.max(0, (+t.amount || 0) - out.refunded);
+    const ms = SA_REFUND_DAYS * 86400000 - (Date.now() - new Date(t.date).getTime());
+    out.daysLeft = Math.max(0, Math.ceil(ms / 86400000));
+    out.eligible = out.remaining > 0 && ms > 0;
+    return out;
+}
+function saOpenRefundModal(txnId){
+    const wallet = saGetWallet(_saWalletAdminId); const t = saAllTxns(wallet).find(x => x.id === txnId); if (!t) return;
+    const rf = saRefundInfo(wallet, t);
+    if (!rf.eligible) { alert('❌ Refund is not available for this transaction (the ' + SA_REFUND_DAYS + '-day refund window is over, or it is already fully refunded).'); return; }
+    const old = document.getElementById('sa-refund-overlay'); if (old) old.remove();
+    const o = document.createElement('div'); o.id = 'sa-refund-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99995;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+    o.innerHTML = '<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;padding:18px;box-sizing:border-box;text-align:left;max-height:92vh;overflow-y:auto;">' +
+        '<h3 style="margin:0 0 4px;font-size:1rem;">↩ Refund to Admin wallet</h3>' +
+        '<div style="font-size:0.74rem;color:var(--grey);margin-bottom:10px;line-height:1.5;">Original Txn: <span style="font-family:monospace;">' + t.id + '</span><br>Deducted: ₹' + t.amount + (rf.refunded ? ' • Already refunded: ₹' + rf.refunded : '') + ' • Refundable now: <b>₹' + rf.remaining + '</b><br>' + rf.daysLeft + ' day(s) left in the refund window.</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:0.8rem;font-weight:700;margin-bottom:8px;"><input type="radio" name="sa-rf-mode" value="full" checked onchange="document.getElementById(\'sa-rf-amt\').disabled=true;"> Full refund (₹' + rf.remaining + ')</label>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:0.8rem;font-weight:700;margin-bottom:8px;"><input type="radio" name="sa-rf-mode" value="custom" onchange="document.getElementById(\'sa-rf-amt\').disabled=false;document.getElementById(\'sa-rf-amt\').focus();"> Enter amount manually</label>' +
+        '<input type="number" id="sa-rf-amt" min="1" max="' + rf.remaining + '" step="1" disabled placeholder="Amount (max ₹' + rf.remaining + ')" style="width:100%;box-sizing:border-box;margin:0 0 8px;">' +
+        '<textarea id="sa-rf-reason" rows="2" placeholder="Reason for refund (required)" style="width:100%;box-sizing:border-box;margin:0 0 10px;"></textarea>' +
+        '<div style="display:flex;gap:8px;"><button style="flex:1;background:#94a3b8;margin:0;" onclick="document.getElementById(\'sa-refund-overlay\').remove()">Cancel</button><button style="flex:2;background:#0d9488;margin:0;" onclick="saConfirmRefund(\'' + t.id + '\')">Confirm Refund</button></div></div>';
+    document.body.appendChild(o);
+}
+function saConfirmRefund(txnId){
+    const mode = (document.querySelector('input[name="sa-rf-mode"]:checked') || {}).value;
+    const reason = (document.getElementById('sa-rf-reason').value || '').trim();
+    try {
+        const data = saReadLibrary(_saWalletAdminId) || {}, wallet = saEnsureWalletShape(data.wallet);
+        const t = saAllTxns(wallet).find(x => x.id === txnId); const rf = saRefundInfo(wallet, t);
+        if (!rf.eligible) throw new Error('Refund is not available for this transaction any more.');
+        const amount = mode === 'full' ? rf.remaining : Math.floor(+document.getElementById('sa-rf-amt').value);
+        if (!(amount >= 1) || amount > rf.remaining) throw new Error('Enter a valid amount between ₹1 and ₹' + rf.remaining + '.');
+        if (!reason) throw new Error('A reason is required.');
+        const refundId = saGenerateWalletTxnId(), nowIso = new Date().toISOString();
+        wallet.balance = (wallet.balance || 0) + amount;
+        wallet.transactions = wallet.transactions || [];
+        wallet.transactions.push({ id: refundId, type: 'credit', amount: amount, balanceAfter: wallet.balance, date: nowIso, by: 'Super Admin', isRefund: true, refundOfTxnId: t.id, chargeType: t.chargeType,
+            note: 'Refund of ' + (t.chargeType === 'maintenance' ? 'Annual Maintenance Charge' : t.chargeType === 'penalty' ? 'Penalty' : 'Subscription Renewal Charge') + (amount < t.amount ? ' (partial)' : '') + ' — Original Txn ID: ' + t.id + ' — Reason: ' + reason });
+        t.refunds = (t.refunds || []).concat([{ txnId: refundId, amount: amount, date: nowIso, reason: reason }]);
+        data.wallet = wallet; saWriteLibrary(_saWalletAdminId, data);
+        document.getElementById('sa-refund-overlay').remove();
+        alert('✅ ₹' + amount + ' refunded to the Admin wallet.\nRefund Txn ID: ' + refundId + '\nOriginal Txn ID: ' + t.id + '\nNew balance: ₹' + wallet.balance);
+        renderSaWalletModal();
+    } catch (e) { alert('❌ ' + e.message); }
 }
 // ===== SUBSCRIPTION PLANS (only the Super Admin creates/edits these) =====
 const SA_PLANS_KEY = 'Samarthak_SA_SubPlans';
