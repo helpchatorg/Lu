@@ -466,6 +466,12 @@
     .sc-code-hidden{filter:blur(8px);transition:filter .3s;user-select:none;}
     .sc-code-visible{filter:none;}
     .sc-show-btn{width:auto!important;padding:7px 20px!important;font-size:0.75rem!important;background:#1e293b!important;margin:8px auto 0!important;border-radius:20px!important;display:block!important;color:#fff;}
+    .sc-code-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:6px;}
+    .sc-code-row .sc-code-value{margin-bottom:0;}
+    .sc-refresh-btn{width:38px!important;height:38px!important;min-width:38px!important;padding:0!important;margin:0!important;border-radius:50%!important;background:#fff!important;border:1.5px solid #fca5a5!important;color:#dc2626!important;display:inline-flex!important;align-items:center;justify-content:center;cursor:pointer;box-shadow:none!important;flex:none;}
+    .sc-refresh-btn svg{width:18px;height:18px;display:block;}
+    .sc-refresh-btn.spin svg{animation:sc-spin .6s linear;}
+    @keyframes sc-spin{to{transform:rotate(360deg);}}
     .sc-info-box{background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:14px;padding:16px;margin-bottom:4px;}
     .sc-info-title{font-size:0.78rem;font-weight:800;color:#0369a1;margin-bottom:10px;}
     .sc-info-item{display:flex;gap:10px;align-items:flex-start;font-size:0.76rem;color:#334155;font-weight:600;margin-bottom:8px;line-height:1.5;}
@@ -632,7 +638,7 @@
                     <button class="sa-add-admin-btn" onclick="openSaAccessStudentModal()">🔓 Access Student Dashboard</button>
                 </div>
                 <div style="padding:0 4px 4px;font-size:0.78rem;color:var(--grey);">Look up a student by Registration ID and send them a request to view their dashboard — same Accept/Reject flow as accessing an Admin account.</div>
-                <div class="sa-table-wrap" style="margin-top:14px;">
+                <div class="sa-table-wrap" id="sa-student-access-wrap" style="margin-top:14px;">
                     <table class="sa-table">
                         <thead>
                             <tr>
@@ -1347,7 +1353,7 @@
         <div class="sc-modal-body">
             <div class="sc-code-display">
                 <div class="sc-code-label">Your Security Code</div>
-                <div class="sc-code-value sc-code-hidden" id="sa-sc-code-val">------</div>
+                <div class="sc-code-row"><div class="sc-code-value sc-code-hidden" id="sa-sc-code-val">------</div><button type="button" class="sc-refresh-btn" id="sa-sc-refresh-btn" onclick="refreshSaSecurityCode()" title="Generate a new code" aria-label="Generate a new security code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button></div>
                 <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
                     <button class="sc-show-btn" id="sa-sc-toggle-btn" onclick="toggleSaSecurityCodeVisibility()" style="margin:0 !important;">Show Code</button>
                     <button class="sc-show-btn" id="sa-sc-copy-btn" onclick="copySaSecurityCode()" style="margin:0 !important; background:#16a34a !important;">Copy Code</button>
@@ -4637,10 +4643,12 @@ function saRenderDueRenewals(){
         const d = saReadLibrary(a.id), sub = d && d.wallet && d.wallet.subscription;
         if (sub && sub.expiresAt) { const n = subDaysLeft(sub.expiresAt); if (n <= 7) rows.push({ id: a.id, sub, n }); }
     });
-    if (!rows.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    if (!rows.length) { el.style.display = 'none'; el.innerHTML = ''; el._dueHtml = null; return; }
     rows.sort((x, y) => x.n - y.n);
     el.style.display = 'block';
-    el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-size:0.92rem;font-weight:800;color:#9a3412;">⏰ Subscriptions Due for Renewal</div><span style="background:#dc2626;color:#fff;font-size:0.7rem;font-weight:800;padding:3px 11px;border-radius:20px;">' + rows.length + '</span></div>' +
+    const _dueHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-size:0.92rem;font-weight:800;color:#9a3412;">⏰ Subscriptions Due for Renewal</div><span style="background:#dc2626;color:#fff;font-size:0.7rem;font-weight:800;padding:3px 11px;border-radius:20px;">' + rows.length + '</span></div>' +
+        '<input type="search" id="sa-due-search" autocomplete="off" placeholder="🔍 Search by Admin ID, plan, status…" oninput="saApplyDueSearch()" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #fdba74;border-radius:10px;font-size:0.78rem;background:#fff;margin:0 0 10px;">' +
+        '<div id="sa-due-none" style="display:none;text-align:center;color:#64748b;font-size:0.74rem;padding:6px 0;">No matching records found.</div>' +
         rows.map(r => {
             const lv = subRestrictLevel(r.sub), urgent = r.n <= 3, col = r.n < 0 ? '#dc2626' : urgent ? '#ea580c' : '#ca8a04', idq = r.id.replace(/'/g, "\\'");
             const when = r.n < 0 ? Math.abs(r.n) + ' day(s) ago expired' : r.n === 0 ? 'Expires today' : r.n + ' day(s) left';
@@ -4648,12 +4656,25 @@ function saRenderDueRenewals(){
             const accept = lv >= 3 ? (r.sub.authorityGranted
                 ? '<button style="border:none;background:#15803d;color:#fff;padding:10px;border-radius:10px;font-size:0.72rem;font-weight:800;cursor:pointer;line-height:1.3;width:100%;margin:0;" onclick="saAcceptByAuthority(\'' + idq + '\')">✅ Accept by Super Admin (Authority granted by Admin)</button>'
                 : '<div style="font-size:0.68rem;color:#64748b;line-height:1.4;text-align:center;">Waiting for the Admin to grant authority</div>') : '';
-            return '<div style="display:flex;flex-direction:column;align-items:stretch;gap:10px;background:#fff;border:1.5px solid ' + col + ';border-left-width:5px;border-radius:12px;padding:12px;margin-bottom:8px;">' +
+            return '<div data-due-row="1" style="display:flex;flex-direction:column;align-items:stretch;gap:10px;background:#fff;border:1.5px solid ' + col + ';border-left-width:5px;border-radius:12px;padding:12px;margin-bottom:8px;">' +
                 '<div style="min-width:0;"><div style="font-size:0.84rem;font-weight:800;overflow-wrap:anywhere;line-height:1.35;">' + subEsc(r.id) + ' — ' + subEsc(r.sub.planName) + '</div>' +
                 '<div style="font-size:0.68rem;color:#64748b;margin-top:2px;">Next Renewal ' + subFmt(r.sub.expiresAt) + '</div>' +
                 '<div style="font-size:0.7rem;font-weight:800;color:' + col + ';margin-top:2px;">⏰ ' + when + (r.sub.autoRenew ? ' • <span style="color:#16a34a;">🔁 Auto-renew ON</span>' : ' • <span style="color:#64748b;">Auto OFF</span>') + lockLbl + '</div></div>' +
                 '<div style="display:flex;flex-direction:column;gap:6px;align-items:stretch;"><button style="border:none;background:' + col + ';color:#fff;padding:11px 12px;border-radius:10px;font-size:0.78rem;font-weight:800;cursor:pointer;width:100%;margin:0;" onclick="openSaSubModal(\'' + idq + '\')">💳 Manage Subscription</button>' + accept + '</div></div>';
         }).join('');
+    if (el._dueHtml !== _dueHtml) {
+        const prev = (el.querySelector('#sa-due-search') || {}), q = prev.value || '', hadFocus = document.activeElement === prev;
+        el.innerHTML = _dueHtml; el._dueHtml = _dueHtml;
+        const inp = el.querySelector('#sa-due-search'); if (inp && q) { inp.value = q; if (hadFocus) { inp.focus(); try { inp.setSelectionRange(q.length, q.length); } catch (e) {} } }
+    }
+    saApplyDueSearch();
+}
+function saApplyDueSearch(){
+    const el = document.getElementById('sa-due-renewals-panel'); if (!el) return;
+    const inp = el.querySelector('#sa-due-search'), none = el.querySelector('#sa-due-none'); if (!inp) return;
+    const q = inp.value.trim().toLowerCase(); let shown = 0, total = 0;
+    el.querySelectorAll('[data-due-row]').forEach(r => { total++; const m = !q || r.textContent.toLowerCase().includes(q); r.style.display = m ? '' : 'none'; if (m) shown++; });
+    if (none) none.style.display = (q && total && !shown) ? 'block' : 'none';
 }
 // Locked dashboard (Auto-Renew OFF, 10+ days past expiry): the Admin cannot log in, so the Super Admin accepts the renewal on their behalf.
 function saAcceptByAuthority(adminId){
@@ -5612,9 +5633,12 @@ function saOpenTicket(ticketId, type, skipSave){
         </div>
     </div>`;
 
+    const _saM = document.getElementById('sa-modal'), _saWasOpen = _saM.classList.contains('open'), _saPrevTop = _saM.scrollTop;
     document.getElementById('sa-td-body').innerHTML = html;
-    document.getElementById('sa-modal').classList.add('open');
-    document.getElementById('sa-modal').scrollTop = 0;
+    _saM.classList.add('open');
+    // Keep the reading position when the open ticket is refreshed in the background; only a fresh open starts at the top.
+    _saM.scrollTo({ top: _saWasOpen ? _saPrevTop : 0, behavior: 'instant' }); // instant: the page-wide smooth-scroll would otherwise animate this jump
+    document.body.style.overflow = 'hidden';
     saRenderTable(); saRenderStats();
 }
 
@@ -5686,6 +5710,7 @@ function saReopen(ticketId){
 
 function saCloseModal(){
     document.getElementById('sa-modal').classList.remove('open');
+    document.body.style.overflow = '';
     saReplyFileData = [];
     saLoadTickets();
 }
@@ -5788,6 +5813,16 @@ function openSaSecurityCodePage(){
     if (valEl) { valEl.innerText = sc; valEl.className = 'sc-code-value sc-code-hidden'; }
     if (btnEl) btnEl.innerText = 'Show Code';
     document.getElementById('sa-security-code-modal').classList.add('open');
+}
+function refreshSaSecurityCode(){
+    if (!confirm('Generate a new Security Code?\n\nThe current code will stop working immediately. Note the new code somewhere safe.')) return;
+    let code, old = (JSON.parse(localStorage.getItem(SA_SECCODE_KEY) || 'null') || {}).code;
+    do { code = saGenerateSecCode(); } while (code === old);
+    localStorage.setItem(SA_SECCODE_KEY, JSON.stringify({ code: code, used: false }));
+    const valEl = document.getElementById('sa-sc-code-val'); if (valEl) valEl.innerText = code;
+    const b = document.getElementById('sa-sc-refresh-btn'); if (b) { b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin'); }
+    const lab = document.querySelector('#sa-security-code-modal .sc-code-label');
+    if (lab) { lab.textContent = '✅ New code generated'; setTimeout(() => { lab.textContent = 'Your Security Code'; }, 2200); }
 }
 function closeSaSecurityCodePage(){
     document.getElementById('sa-security-code-modal').classList.remove('open');
@@ -6608,7 +6643,7 @@ if (sessionStorage.getItem('sa_logged_in') === '1') {
         '<div class="sa-panel-head"><h2>📊 Acceptance Status</h2></div>' +
         '<div class="sampol-status-summary" id="sampol-status-summary"></div>' +
         '<div class="sampol-status-filters" id="sampol-status-filters"></div>' +
-        '<div class="sampol-status-table-wrap"><table class="sampol-status-table"><thead>' +
+        '<div class="sampol-status-table-wrap" id="sampol-status-wrap"><table class="sampol-status-table"><thead>' +
           '<tr><th>Role</th><th>ID</th><th>Name</th><th>Status</th><th>Version</th><th>Times Shown</th><th>Declines</th><th>Last Shown</th><th>Last Response</th></tr>' +
         '</thead><tbody id="sampol-status-tbody"></tbody></table></div>' +
       '</div>';
@@ -6629,6 +6664,7 @@ if (sessionStorage.getItem('sa_logged_in') === '1') {
     document.getElementById('sampol-adm-editor').innerHTML = policy.html;
 
     renderStatusDashboard();
+    try { if (window.wlSetupSearch) wlSetupSearch('sampol-status-wrap', 'tbody tr', '🔍 Search policy acceptance (role, ID, name, status…)'); } catch (e) {}
     window.__sampolAdmContainerId = containerId;
   }
 
@@ -7307,6 +7343,7 @@ function wlInitSearchBars(){
     wlSetupSearch('admin-wallet-charge-requests', '.wallet-history-row', '🔍 Search subscription history (Txn ID, amount, date…)');
     wlSetupSearch('sa-wallet-tx-list', ':scope > div:not(.wallet-epoch-divider)', '🔍 Search transactions (Txn ID, amount, date, note…)');
     wlSetupSearch('sa-wallet-lock-history-panel', ':scope > div > div:not(.wallet-epoch-divider)', '🔍 Search log (action, date, eKYC…)');
+    wlSetupSearch('sa-student-access-wrap', 'tbody tr', '🔍 Search by student, Reg No, library, token ID or status…');
     wlSetupSearch('sa-wallet-charge-requests', ':scope > div', '🔍 Search subscription history (Txn ID, amount, date…)');
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wlInitSearchBars); else wlInitSearchBars();
