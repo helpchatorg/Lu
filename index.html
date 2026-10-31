@@ -2023,7 +2023,6 @@ function saRequestWalletRenewalCharge(adminId, amount, note, plan){
 function saRecordCashRenewal(adminId, amount, note, plan){
     const data = saReadLibrary(adminId) || {};
     const wallet = saEnsureWalletShape(data.wallet);
-    if (wallet.status === 'frozen') throw new Error('This wallet is frozen (Reason: ' + (wallet.freezeReason || '—') + '). A subscription cannot be activated until it is unfrozen.');
     const nowIso = new Date().toISOString(), txnId = 'CSH' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 100);
     const keepAuto = !!(wallet.subscription && wallet.subscription.autoRenew);
     wallet.chargeRequests = wallet.chargeRequests || [];
@@ -4795,7 +4794,7 @@ const SA_CHARGE_META = {
     renewal:     { title: '🔄 Request Subscription Renewal Charge', desc: 'This will be sent to the Admin as a request. The amount is deducted only if the Admin Accepts it.', color: '#0369a1', btnLabel: 'Send Renewal Request', noteLabel: 'Note (optional)', notePlaceholder: 'e.g. Annual subscription renewal — Sep 2026' }
 };
 // Wallet states where nothing may be deducted from the wallet, yet a Cash renewal payment can still be recorded.
-function saCashOnlyStatus(st){ return st === 'deactivated' || st === 'closing' || st === 'closed'; }
+function saCashOnlyStatus(st){ return st === 'deactivated' || st === 'closing' || st === 'closed' || st === 'frozen'; }
 function saSetupPending(w){ return !(w && w.setup && w.setup.done); }
 function saCashOnlyWallet(w){ return saSetupPending(w) || saCashOnlyStatus(w.status); }
 function saOpenChargeModal(type){
@@ -4829,7 +4828,7 @@ function saOpenChargeModal(type){
         if (wb) { wb.disabled = deact; wb.style.opacity = deact ? '.4' : ''; wb.style.cursor = deact ? 'not-allowed' : ''; }
         let nt = document.getElementById('sa-paymode-deact-note');
         if (!nt && wb) { nt = document.createElement('div'); nt.id = 'sa-paymode-deact-note'; nt.style.cssText = 'font-size:0.66rem;color:#92400e;margin-top:6px;line-height:1.5;'; document.getElementById('sa-charge-paymode-wrap').appendChild(nt); }
-        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = wallet.status === 'closed' ? '🔒 This wallet is Permanently Closed — wallet deduction is blocked, so only a Cash payment can be recorded.' : saSetupPending(wallet) && wallet.status !== 'closing' && wallet.status !== 'deactivated' ? '⏳ The Admin has not completed First-Time Wallet Setup & AI Video eKYC yet — wallet deduction is blocked, so only a Cash payment can be recorded.' : wallet.status === 'closing' ? '🔒 Permanent closure is requested for this wallet — wallet deduction is blocked, so only a Cash payment can be recorded.' : '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
+        if (nt) { nt.style.display = deact ? 'block' : 'none'; nt.textContent = wallet.status === 'frozen' ? '🧊 This wallet is Frozen — wallet deduction is blocked, so only a Cash payment can be recorded.' : wallet.status === 'closed' ? '🔒 This wallet is Permanently Closed — wallet deduction is blocked, so only a Cash payment can be recorded.' : saSetupPending(wallet) && wallet.status !== 'closing' && wallet.status !== 'deactivated' ? '⏳ The Admin has not completed First-Time Wallet Setup & AI Video eKYC yet — wallet deduction is blocked, so only a Cash payment can be recorded.' : wallet.status === 'closing' ? '🔒 Permanent closure is requested for this wallet — wallet deduction is blocked, so only a Cash payment can be recorded.' : '⏸ Wallet is Deactivated — wallet deduction is blocked, so only a Cash payment can be recorded.'; }
         if (deact) saPickPayMode('cash');
     }
     document.getElementById('sa-charge-modal').style.display = 'flex';
@@ -4848,7 +4847,7 @@ function saConfirmChargeModal(){
     }
     if (_saChargeType === 'penalty' && !note) { document.getElementById('err-sa-charge-note').style.display = 'block'; return; }
     try {
-        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saCashOnlyWallet(saGetWallet(_saWalletAdminId))) { alert('❌ ' + (saSetupPending(saGetWallet(_saWalletAdminId)) && saGetWallet(_saWalletAdminId).status !== 'closed' ? 'The Admin has not completed wallet setup & Video eKYC yet' : 'This wallet is ' + (saGetWallet(_saWalletAdminId).status === 'closing' ? 'under a Permanent Closure request' : saGetWallet(_saWalletAdminId).status === 'closed' ? 'Permanently Closed' : 'Deactivated')) + ' — only a Cash payment can be recorded.'); return; }
+        if (_saChargeType === 'renewal' && _saPayMode !== 'cash' && saCashOnlyWallet(saGetWallet(_saWalletAdminId))) { alert('❌ ' + (saSetupPending(saGetWallet(_saWalletAdminId)) && saGetWallet(_saWalletAdminId).status !== 'closed' && saGetWallet(_saWalletAdminId).status !== 'frozen' ? 'The Admin has not completed wallet setup & Video eKYC yet' : 'This wallet is ' + (saGetWallet(_saWalletAdminId).status === 'closing' ? 'under a Permanent Closure request' : saGetWallet(_saWalletAdminId).status === 'closed' ? 'Permanently Closed' : saGetWallet(_saWalletAdminId).status === 'frozen' ? 'Frozen' : 'Deactivated')) + ' — only a Cash payment can be recorded.'); return; }
         if (_saChargeType === 'renewal' && _saPayMode === 'cash') {
             const snap = saSelectedPlanSnapshot();
             if (!snap) { alert('❌ Select a subscription plan to record a cash payment.'); return; }
@@ -4916,6 +4915,7 @@ function renderSaSubModal(){
     btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.45'; btn.style.cursor = ok ? 'pointer' : 'not-allowed';
     hint.innerHTML = (!setupDone && wallet.status === 'active') ? '⏳ The Admin has not completed First-Time Wallet Setup &amp; AI Video eKYC yet — only a <b>Cash</b> payment can be recorded (no wallet deduction).'
         : wallet.status === 'deactivated' ? '⏸ Wallet is Deactivated — renewal requests that deduct from the wallet are blocked until the Admin reactivates it. You can still record a <b>Cash</b> payment.'
+        : wallet.status === 'frozen' ? '🧊 Wallet is Frozen — no renewal charge can be deducted from the wallet. You can still record a <b>Cash</b> payment.'
         : wallet.status === 'closed' ? '🔒 Wallet is Permanently Closed — no renewal charge can be deducted from the wallet. You can still record a <b>Cash</b> payment.'
         : wallet.status === 'closing' ? '🔒 Permanent closure is requested — renewal requests that deduct from the wallet are blocked. You can still record a <b>Cash</b> payment.'
         : wallet.status !== 'active' ? '⛔ Renewal requests cannot be sent while the wallet is ' + wallet.status + '.'
