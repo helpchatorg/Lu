@@ -4405,6 +4405,7 @@ document.addEventListener('visibilitychange', saRefreshStatusBars);
 function subStatus(sub){
     if (!sub || !sub.expiresAt) return { label: 'No active subscription', color: '#64748b', days: 0 };
     const d = subDaysLeft(sub.expiresAt);
+    if (sub.cancelled) return { label: 'Cancelled', color: '#b91c1c', days: d };
     return d < 0 ? { label: 'Expired', color: '#dc2626', days: d } : d <= 7 ? { label: 'Expiring soon', color: '#ea580c', days: d } : { label: 'Active', color: '#16a34a', days: d };
 }
 function subInvNo(h, idx){ const d = new Date(h.date), p = n => String(n).padStart(2, '0'); return 'INV-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + String(idx + 1).padStart(3, '0'); }
@@ -4453,13 +4454,13 @@ function subCardHtml(sub, isAdmin, wallet){
     const upd = "var o=this.options[this.selectedIndex],p=this.parentNode;p.querySelector('.sub-inv-no').textContent=o.dataset.no;p.querySelector('.sub-inv-txn').textContent='Txn ID: '+o.dataset.txn;";
     return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;"><strong style="font-size:0.84rem;color:#0369a1;">💳 Subscription — ' + subEsc(sub.planName) + '</strong>' +
         '<span style="font-size:0.64rem;font-weight:800;color:#fff;background:' + st.color + ';padding:3px 10px;border-radius:20px;white-space:nowrap;">' + st.label + '</span></div>' +
-        '<div style="font-size:0.74rem;font-weight:700;">Started: ' + subFmt(sub.startedAt) + ' &nbsp;•&nbsp; Next Renewal: ' + subFmt(sub.expiresAt) + '</div>' +
-        '<div style="font-size:0.72rem;color:' + st.color + ';font-weight:800;margin-top:3px;">' + (st.days >= 0 ? st.days + ' day(s) left' : Math.abs(st.days) + ' day(s) ago (expired)') + '</div>' +
+        '<div style="font-size:0.74rem;font-weight:700;">Started: ' + subFmt(sub.startedAt) + ' &nbsp;•&nbsp; ' + (sub.cancelled ? 'Cancelled on: ' : 'Next Renewal: ') + subFmt(sub.expiresAt) + '</div>' +
+        '<div style="font-size:0.72rem;color:' + st.color + ';font-weight:800;margin-top:3px;">' + (st.days >= 0 ? (sub.cancelled ? 'Cancelled today' : st.days + ' day(s) left') : Math.abs(st.days) + ' day(s) ago (' + (sub.cancelled ? 'cancelled' : 'expired') + ')') + '</div>' +
         (hist.length && hist[last].discPct ? '<div style="margin-top:8px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:8px 11px;font-size:0.7rem;font-weight:800;line-height:1.5;">🏷️ Discount applied: ' + subEsc(hist[last].discName) + ' — <b>' + hist[last].discPct + '% off</b><br><span style="font-weight:700;">List price ₹' + hist[last].listPrice + ' → Paid ₹' + hist[last].amount + ' (saved ₹' + (Number(hist[last].listPrice) - Number(hist[last].amount)).toFixed(2).replace(/\.00$/, '') + ')' + (hist[last].payMode === 'Cash' ? ' · Paid in cash' : '') + '</span></div>' : (hist.length && hist[last].payMode === 'Cash' ? '<div style="margin-top:8px;font-size:0.7rem;font-weight:800;color:#92400e;">💵 Last payment: cash, received by Super Admin</div>' : '')) +
         '<div style="margin-top:10px;background:linear-gradient(135deg,#fff,#f0f9ff);border:1px solid ' + (on ? '#86efac' : '#bae6fd') + ';border-radius:14px;padding:11px 13px;">' +
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div style="font-size:0.8rem;font-weight:800;">🔁 Auto-Renewal: <span style="color:' + (on ? '#16a34a' : '#64748b') + ';">' + (on ? 'ON' : 'OFF') + '</span>' + (isAdmin ? '' : ' <span style="font-weight:600;color:#64748b;font-size:0.66rem;">(set by the Admin)</span>') + '</div>' + (isAdmin ? sw : '') + '</div>' +
             '<div style="font-size:0.68rem;color:#475569;line-height:1.55;margin-top:7px;">' + subAutoText(sub, isAdmin) + '</div></div>' +
-        subRestrictLine(sub) +
+        subRestrictLine(sub) + subCancelBlockHtml(sub, false) +
         (wallet && wallet.balance < 0 && sub.autoNegative ? '<div style="margin-top:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:10px 12px;font-size:0.68rem;line-height:1.5;color:#991b1b;"><b>⚠️ Why is the wallet balance negative?</b><br>The ' + (sub.autoNegative.kind === 'authority' ? 'renewal accepted by the Super Admin (authority granted by the Admin)' : 'Auto-Renewal') + ' of ₹' + sub.autoNegative.amount + ' (' + subEsc(sub.autoNegative.planName) + ' plan) on ' + subFmt(sub.autoNegative.date) + ' was deducted when the wallet had only ₹' + sub.autoNegative.balanceBefore + ', so the balance went to −₹' + Math.abs(sub.autoNegative.balanceAfter) + '. Please add funds to bring it back above zero.</div>' : '') +
         (hist.length ? '<div style="margin-top:10px;background:#fff;border:1px solid #bae6fd;border-radius:14px;padding:11px 13px;">' +
             '<div style="font-size:0.62rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Invoice Number</div>' +
@@ -4519,8 +4520,8 @@ function subPlanNote(sub, plan, role){
 // Restriction ladder (only when Auto-Renew is OFF): days after expiry -> 1-5 grace, 6+ operations, 8+ configuration, 11+ dashboard locked.
 function subRestrictLevel(sub){
     if (!sub || !sub.expiresAt || sub.autoRenew) return 0;
-    const over = -subDaysLeft(sub.expiresAt);
-    return over >= 11 ? 3 : over >= 8 ? 2 : over >= 6 ? 1 : 0;
+    const over = -subDaysLeft(sub.expiresAt), g = subGraceDays(sub);
+    return over >= g + 6 ? 3 : over >= g + 3 ? 2 : over >= g + 1 ? 1 : 0;
 }
 function subRestrictLine(sub){
     if (!sub || !sub.expiresAt || sub.autoRenew) return '';
@@ -4529,7 +4530,8 @@ function subRestrictLine(sub){
     if (lv === 3) return box('#991b1b', '#fef2f2', '🔒 Dashboard locked — the Admin cannot log in until the renewal is accepted.');
     if (lv === 2) return box('#991b1b', '#fef2f2', '🔒 Restricted — registrations, student work and fees are blocked, and system configuration is locked (view-only).');
     if (lv === 1) return box('#9a3412', '#fff7ed', '🔒 Restricted — new registrations, student-related work and fees management are blocked.');
-    return box('#854d0e', '#fefce8', '⏳ Grace period: day ' + over + ' of 5 after expiry. Restrictions begin after day 5.');
+    const g = subGraceDays(sub);
+    return box('#854d0e', '#fefce8', '⏳ Grace period: day ' + over + ' of ' + g + (sub.cancelled ? ' after cancellation' : ' after expiry') + '. Restrictions begin after day ' + g + '.');
 }
 function subPolicyHtml(){
     return '<details style="margin-top:10px;background:#fff;border:1px solid #bae6fd;border-radius:14px;padding:10px 13px;"><summary style="font-size:0.76rem;font-weight:800;color:#0369a1;cursor:pointer;">ℹ️ Renewal &amp; restriction policy</summary><div style="font-size:0.7rem;color:#475569;line-height:1.6;margin-top:8px;">' +
@@ -4539,10 +4541,49 @@ function subPolicyHtml(){
         '• <b>After day 5:</b> new student registration, all student-related work and fees management are restricted automatically.<br>' +
         '• <b>Day 8:</b> system configuration is locked — you can view it but cannot edit or change anything.<br>' +
         '• <b>After day 10:</b> your dashboard is locked. When you try to log in you will see a lock screen where you can grant the Super Admin the authority to accept the renewal on your behalf. Once granted and accepted, the amount is deducted from your wallet (the balance may go negative), the dashboard unlocks immediately and works exactly as before.<br><br>' +
+        '<b>Cancelling:</b> the Admin or the Super Admin can cancel the subscription at any time. A cancelled plan gets a <b>10-day grace period</b> (instead of 5), after which the same restrictions apply: registrations, student work and fees (after day 10), system configuration lock (day 13) and dashboard lock (after day 15). A new renewal restores everything.<br><br>' +
         '<b>Changing plans:</b> a new plan starts the day you accept it, so the remaining days of your current plan are lost. Renewing the same plan, or switching when only 1–2 days are left, keeps your remaining days.</div></details>';
 }
+
+// ===== SUBSCRIPTION CANCELLATION (Admin or Super Admin, any time while the plan is running) =====
+// A cancelled plan behaves like an expired one, but with a 10-day grace period instead of 5; after that the same restriction ladder applies.
+function subGraceDays(sub){ return sub && sub.cancelled ? 10 : 5; }
+function subCancelCore(w, by, reason){
+    const s = w && w.subscription;
+    if (!s || !s.expiresAt) throw new Error('There is no subscription to cancel.');
+    if (s.cancelled) throw new Error('This subscription is already cancelled.');
+    if (subDaysLeft(s.expiresAt) < 0) throw new Error('This subscription has already expired, so it cannot be cancelled. Renew it instead.');
+    const iso = new Date().toISOString();
+    s.cancelled = true; s.cancelledAt = iso; s.cancelledBy = by; s.cancelReason = reason || '';
+    s.prevExpiresAt = s.expiresAt; s.expiresAt = iso; s.autoRenew = false; s.autoOnSince = null;
+    (w.chargeRequests || []).forEach(r => { if (r.status === 'Pending' && r.type === 'renewal') { r.status = 'Rejected'; r.decidedAt = iso; r.decisionReason = 'Subscription was cancelled'; } });
+    return s;
+}
+function subCancelDialog(by, onConfirm){
+    const old = document.getElementById('sub-cancel-overlay'); if (old) old.remove();
+    const o = document.createElement('div'); o.id = 'sub-cancel-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99996;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+    o.innerHTML = '<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:18px;box-sizing:border-box;text-align:left;max-height:92vh;overflow-y:auto;">' +
+        '<h3 style="margin:0 0 8px;font-size:1rem;color:#991b1b;">🚫 Cancel Subscription</h3>' +
+        '<div style="font-size:0.74rem;color:#475569;line-height:1.6;margin-bottom:10px;">The subscription ends <b>today</b>, Auto-Renewal is switched OFF and pending renewal requests are rejected.<br>• <b>10-day grace period</b> — everything keeps working.<br>• <b>After day 10:</b> registrations, student work and fees are restricted.<br>• <b>Day 13:</b> system configuration is locked (view-only).<br>• <b>After day 15:</b> the dashboard is locked.<br>A new renewal restores everything at any time.</div>' +
+        '<textarea id="sub-cancel-reason" rows="2" placeholder="Reason for cancellation (required)" style="width:100%;box-sizing:border-box;margin:0 0 10px;"></textarea>' +
+        '<div style="display:flex;gap:8px;"><button type="button" style="flex:1;background:#94a3b8;color:#fff;margin:0;" id="sub-cancel-no">Keep Subscription</button><button type="button" style="flex:1;background:#dc2626;color:#fff;margin:0;" id="sub-cancel-yes">Cancel Subscription</button></div></div>';
+    document.body.appendChild(o);
+    o.querySelector('#sub-cancel-no').onclick = function(){ o.remove(); };
+    o.querySelector('#sub-cancel-yes').onclick = function(){
+        const reason = (document.getElementById('sub-cancel-reason').value || '').trim();
+        if (!reason) { alert('❌ Please enter the reason for cancellation.'); return; }
+        o.remove(); onConfirm(reason);
+    };
+}
+function subCancelBlockHtml(sub, isAdmin){
+    if (!sub || !sub.expiresAt) return '';
+    if (sub.cancelled) return '<div style="margin-top:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:9px 11px;font-size:0.7rem;line-height:1.55;"><b>🚫 Subscription cancelled</b> by ' + subEsc(sub.cancelledBy || '—') + ' on ' + subFmt(sub.cancelledAt) + (sub.cancelReason ? '<br>Reason: ' + subEsc(sub.cancelReason) : '') + '<br>10-day grace period — restrictions begin after day 10.<br>A new renewal restores the subscription.</div>';
+    if (subDaysLeft(sub.expiresAt) < 0) return '';
+    return '<button type="button" onclick="' + (isAdmin ? 'subCancelAsk()' : 'saCancelSubAsk()') + '" style="width:100%;margin:10px 0 0;background:#fff;color:#dc2626;border:1.5px solid #fca5a5;border-radius:10px;padding:10px;font-size:0.76rem;font-weight:800;cursor:pointer;">🚫 Cancel Subscription</button>';
+}
 function subApplyTerm(w, plan, amount, txnId, auto, isAutoCharge){
-    const now = new Date(), old = w.subscription, mode = subTermMode(old, plan), stack = mode.kind === 'extend' || mode.kind === 'carry';
+    const now = new Date(), old = w.subscription, mode = (old && old.cancelled) ? { kind: 'fresh', days: 0 } : subTermMode(old, plan), stack = mode.kind === 'extend' || mode.kind === 'carry';
     const start = new Date(); start.setHours(0, 0, 0, 0);
     if (stack) { start.setTime(new Date(old.expiresAt).getTime()); start.setDate(start.getDate() + 1); start.setHours(0, 0, 0, 0); }
     const end = new Date(start); if (plan.days > 0) end.setDate(end.getDate() + plan.days); else end.setMonth(end.getMonth() + plan.months); end.setDate(end.getDate() - 1); end.setHours(23, 59, 59, 999);
@@ -4593,7 +4634,7 @@ function subAutoAcceptPendingCore(w, genId){
 // Auto-SEND: Auto-Renew OFF -> on the Next Renewal date the system itself raises the renewal request to the Admin (no manual sending needed).
 function subAutoRequestCore(w){
     const s = w.subscription;
-    if (!s || !s.expiresAt || s.autoRenew || w.status !== 'active' || !(w.setup && w.setup.done) || subDaysLeft(s.expiresAt) > 0) return false;
+    if (!s || !s.expiresAt || s.cancelled || s.autoRenew || w.status !== 'active' || !(w.setup && w.setup.done) || subDaysLeft(s.expiresAt) > 0) return false;
     w.chargeRequests = w.chargeRequests || [];
     // Max 3 automatic sends per renewal cycle, at most one per calendar day (renewal date, +1 day, +2 days).
     if (s.autoRequestedFor !== s.expiresAt) { s.autoRequestedFor = s.expiresAt; s.autoSendCount = 0; s.autoSendLastDay = null; }
@@ -4651,7 +4692,7 @@ function saRenderDueRenewals(){
         '<div id="sa-due-none" style="display:none;text-align:center;color:#64748b;font-size:0.74rem;padding:6px 0;">No matching records found.</div>' +
         rows.map(r => {
             const lv = subRestrictLevel(r.sub), urgent = r.n <= 3, col = r.n < 0 ? '#dc2626' : urgent ? '#ea580c' : '#ca8a04', idq = r.id.replace(/'/g, "\\'");
-            const when = r.n < 0 ? Math.abs(r.n) + ' day(s) ago expired' : r.n === 0 ? 'Expires today' : r.n + ' day(s) left';
+            const when = r.sub.cancelled ? (r.n === 0 ? 'Cancelled today' : 'Cancelled ' + Math.abs(r.n) + ' day(s) ago') : r.n < 0 ? Math.abs(r.n) + ' day(s) ago expired' : r.n === 0 ? 'Expires today' : r.n + ' day(s) left';
             const lockLbl = lv ? ' • <span style="color:#b91c1c;">🔒 ' + (lv >= 3 ? 'Dashboard locked' : lv === 2 ? 'Config locked' : 'Operations restricted') + '</span>' : '';
             const accept = lv >= 3 ? (r.sub.authorityGranted
                 ? '<button style="border:none;background:#15803d;color:#fff;padding:10px;border-radius:10px;font-size:0.72rem;font-weight:800;cursor:pointer;line-height:1.3;width:100%;margin:0;" onclick="saAcceptByAuthority(\'' + idq + '\')">✅ Accept by Super Admin (Authority granted by Admin)</button>'
@@ -4677,6 +4718,22 @@ function saApplyDueSearch(){
     if (none) none.style.display = (q && total && !shown) ? 'block' : 'none';
 }
 // Locked dashboard (Auto-Renew OFF, 10+ days past expiry): the Admin cannot log in, so the Super Admin accepts the renewal on their behalf.
+function saCancelSubAsk(){
+    if (!_saWalletAdminId) return;
+    const adminId = _saWalletAdminId;
+    subCancelDialog('Super Admin', function(reason){
+        try {
+            const data = saReadLibrary(adminId) || {}, w = saEnsureWalletShape(data.wallet);
+            subCancelCore(w, 'Super Admin', reason);
+            data.wallet = w; saWriteLibrary(adminId, data);
+        } catch (e) { alert('❌ ' + e.message); return; }
+        try { renderSaWalletModal(); } catch (e) {}
+        try { if (document.getElementById('sa-sub-modal') && document.getElementById('sa-sub-modal').style.display === 'flex') renderSaSubModal(); } catch (e) {}
+        try { saRenderDueRenewals(); } catch (e) {}
+        try { saRenderAdminsPanel(); } catch (e) {}
+        alert('🚫 Subscription cancelled for ' + adminId + '.\nA 10-day grace period has started; restrictions follow after that.');
+    });
+}
 function saAcceptByAuthority(adminId){
     const data = saReadLibrary(adminId) || {}, w = saEnsureWalletShape(data.wallet), s = w.subscription;
     if (subRestrictLevel(s) < 3) { alert('❌ This option is available only after the Admin\'s dashboard is locked (more than 10 days after expiry with Auto-Renew OFF).'); return; }
