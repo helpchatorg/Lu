@@ -258,6 +258,12 @@
     .sa-msg.from-admin{background:#eff6ff;border:1px solid #bfdbfe;align-self:flex-start;border-radius:12px 12px 12px 2px;}
     .sa-msg.from-student{background:#f0fdf4;border:1px solid #bbf7d0;align-self:flex-start;border-radius:12px 12px 12px 2px;}
     .sa-msg .meta{font-size:0.65rem;color:var(--grey);margin-top:5px;}
+    .sa-msg-row{display:flex;align-items:flex-end;gap:8px;}
+    .sa-msg-row.right{flex-direction:row-reverse;}
+    .sa-msg-row .sa-msg{max-width:calc(100% - 42px);}
+    .sa-chat-avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;flex:0 0 30px;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.18);background:#0b2a4a;}
+    /* Browser already shows its own show/hide eye on password fields (e.g. Edge) -> hide ours */
+    html.native-pw-reveal .toggle-pass{display:none!important;}
     .sa-timeline-item{font-size:0.78rem;color:var(--grey);padding:4px 0;border-left:2px solid var(--border);padding-left:10px;margin-left:3px;}
     .sa-status-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
     .sa-primary-btn{background:var(--primary);color:#fff;padding:11px;font-size:0.8rem;width:100%;}
@@ -507,6 +513,17 @@
         .wallet-epoch-divider::before, .wallet-epoch-divider::after { content:''; flex:1; border-top:2px dashed #a5b4fc; }
         .wallet-epoch-divider span { white-space:normal; padding:0 2px; }
 </style>
+<script>
+(function () {
+    // Does this browser already draw its own show/hide (eye) button inside password fields?
+    var native = false;
+    try {
+        native = /\bEdg(e|A|iOS)?\//.test(navigator.userAgent) ||
+                 !!(window.CSS && CSS.supports && CSS.supports('selector(input::-ms-reveal)'));
+    } catch (e) {}
+    if (native) document.documentElement.classList.add('native-pw-reveal');
+})();
+</script>
 </head>
 <body>
 
@@ -5592,6 +5609,16 @@ function saRefreshTicketInPlace(ticketId, type){
     }
 }
 
+// Chat avatars: students show their own profile photo; Admin / Super Admin show the default profile icon
+const SA_STAFF_AVATAR = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCABgAGADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5+8tP7oo8tP7op1FezY8m43y0/uijy0/uinUUWC43y0/uijy0/uinUUWC43y0/uijy0/uinUUWC43y0/uijy0/uinUUWC43y0/uijy0/uinUUWC4UUUUCCiiigAoroPB3hG58W37Qo/kW0IDTzYztB6ADuTXpf/CpfDXkeXsvd+P9b553Z9cYx+lddDBVa0eaOxzVsXTpPllueKUV0PjLwfceEr5I2k8+1mBMM2ME46qR2Irnq55wlCTjJao3hNTjzR2CiiioKCiiigAooooAKKKKAPXPgzLCdGv4lI85bkM477Sox/I16FXz34U1DWtL1JbrRYJp5MbXjSNnWRf7rAf5Feof8Jr4i+zbv+EI1Hzsf3/kz+Wa9/A4uKpKMk9PJni4vDSdRyj18yn8ZJYV0KyiYjzmutyDvgKdx/UV5DW34s1HW9V1I3WtW89u+NscbxsiRr6Ln/JrErysZW9rVckrHpYWl7OmothRRRXKdAUUUUAFFFFABXp3w38BafqGmprOqwi581iIIWPyBQcbiO5JB46V5jXq3w98d6NY+H4dM1G6WzmtiwVpAdsikkgggdecYruwCpur+928zkxrqez/AHZ6LBDFbRiKCNIo14CRqFA/AU+uf/4T/wAL/wDQbtP/AB7/AAo/4T/wv/0G7T/x7/Cvofb0v5l954nsan8r+43ZoY7iMxTRpLG3BR1DA/ga8z+I/gLT7HTJNZ0qEWxhYedCn3GUnG4DsQSOnFdf/wAJ/wCF/wDoN2n/AI9/hXM/EDx5ot54fn03Trpbya6wpMYO2NQQSSSOvHSuXFzoTpO7TfQ6MNGtGorJnk9FFFfNHvBRRRQAUUUUAFFFFAC5NGTSUUALk0lFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAf/Z';
+function saStudentPhotoFor(t){
+    try {
+        const lib = t && t._libraryAdminId ? saReadLibrary(t._libraryAdminId) : null;
+        const st = lib && Array.isArray(lib.students) ? lib.students.find(x => x.regNo === t.regNo) : null;
+        if (st && st.photo) return st.photo;
+    } catch (e) {}
+    return SA_STAFF_AVATAR;
+}
 function saOpenTicket(ticketId, type, skipSave){
     saCurrentModalType = type; saCurrentModalId = ticketId;
     if (!skipSave) { saReplyFileData = []; }
@@ -5643,14 +5670,17 @@ function saOpenTicket(ticketId, type, skipSave){
 
     if (t.messages && t.messages.length){
         html += `<div class="lab" style="margin-bottom:8px;">Conversation</div><div class="sa-msgs">`;
+        const stuPhoto = (type === 'student') ? saStudentPhotoFor(t) : SA_STAFF_AVATAR;
         html += t.messages.map(m => {
             const cls = m.by === 'superadmin' ? 'from-super' : (m.by === 'admin' ? 'from-admin' : 'from-student');
             const label = m.by === 'superadmin' ? '🛠️ Super Admin' : (m.by === 'admin' ? '👤 Admin' : '🎓 Student');
-            return `<div class="sa-msg ${cls}">
+            const isStaffMsg = (m.by === 'superadmin' || m.by === 'admin');
+            const avatar = isStaffMsg ? SA_STAFF_AVATAR : stuPhoto;
+            return `<div class="sa-msg-row ${m.by === 'superadmin' ? 'right' : ''}"><img class="sa-chat-avatar" src="${avatar}" alt=""><div class="sa-msg ${cls}">
                 <div>${m.text}</div>
                 ${saRenderAttachLinks(m.files || m.file, m.by === 'superadmin' ? 'var(--primary)' : (m.by === 'admin' ? '#1d4ed8' : '#15803d'))}
                 <div class="meta">${label} · ${saFormatDate(m.time)} ${saFormatTime(m.time)}</div>
-            </div>`;
+            </div></div>`;
         }).join('');
         html += `</div>`;
     }
