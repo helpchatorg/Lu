@@ -5631,7 +5631,7 @@ function saOpenTicket(ticketId, type, skipSave){
     // this Admin's own Help & Support Center shows them the same hours as a response-time cue.
     const shBox = document.getElementById('sa-td-support-hours');
     if (shBox) {
-        if (type === 'admin') {
+        if (false) { // working hours line is intentionally NOT shown inside the Super Admin dashboard (Admin side still shows it)
             const wh = saGetWorkingHours();
             const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
             const daysText = (Array.isArray(wh.days) && wh.days.length) ? wh.days.slice().sort((a,b)=>a-b).map(d=>dayLabels[d]).join(', ') : 'Any day';
