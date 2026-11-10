@@ -5627,6 +5627,113 @@ function time12(t) {
     return h + ':' + m[2] + ' ' + ap;
 }
 
+// ===== Clock-face time picker (12-hour, AM/PM) — replaces <input type="time"> with an in-page dialog =====
+// The dialog is drawn by the app itself, so it always sits inside the screen with side margins and a rounded border,
+// and always shows 12-hour time whatever the phone's own time setting is. The original input stays (hidden) and keeps
+// holding the 24-hour "HH:MM" value, so every piece of code that reads or sets `.value` works unchanged.
+let _clk = null;
+function clkBuild() {
+    const wrap = document.createElement('div');
+    wrap.id = 'clk-overlay';
+    wrap.style.cssText = 'display:none;position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;';
+    wrap.innerHTML =
+        '<div style="width:100%;max-width:340px;background:#2a2a30;border:1px solid rgba(255,255,255,0.12);border-radius:28px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.5);color:#e8e8ee;font-family:inherit;">' +
+          '<div style="background:#4a4a51;padding:18px 20px 14px;display:flex;align-items:center;justify-content:center;gap:10px;">' +
+            '<div style="display:flex;align-items:center;font-size:3.1rem;font-weight:400;line-height:1;">' +
+              '<span id="clk-h" style="cursor:pointer;padding:2px 6px;border-radius:10px;"></span><span style="opacity:.7;">:</span><span id="clk-m" style="cursor:pointer;padding:2px 6px;border-radius:10px;"></span>' +
+            '</div>' +
+            '<div style="display:flex;flex-direction:column;gap:4px;font-size:1rem;font-weight:700;">' +
+              '<span id="clk-am" style="cursor:pointer;padding:4px 8px;border-radius:8px;">AM</span><span id="clk-pm" style="cursor:pointer;padding:4px 8px;border-radius:8px;">PM</span>' +
+            '</div>' +
+          '</div>' +
+          '<div style="padding:18px 0 6px;display:flex;justify-content:center;"><svg id="clk-face" width="256" height="256" viewBox="0 0 256 256" style="touch-action:none;cursor:pointer;"></svg></div>' +
+          '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 14px 16px;">' +
+            '<button type="button" id="clk-clear" style="background:none;border:none;color:#aecbfa;font-weight:700;font-size:0.95rem;padding:10px 14px;cursor:pointer;margin:0;width:auto;">Clear</button>' +
+            '<button type="button" id="clk-cancel" style="background:none;border:none;color:#aecbfa;font-weight:700;font-size:0.95rem;padding:10px 14px;cursor:pointer;margin:0;width:auto;">Cancel</button>' +
+            '<button type="button" id="clk-set" style="background:none;border:none;color:#aecbfa;font-weight:800;font-size:0.95rem;padding:10px 14px;cursor:pointer;margin:0;width:auto;">Set</button>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(wrap);
+    const st = { el: wrap, mode: 'hour', h: 12, m: 0, ap: 'AM', inp: null };
+    const g = id => wrap.querySelector('#' + id);
+    const pos = (val, per, r) => { const a = (val % per) / per * 2 * Math.PI; return [128 + r * Math.sin(a), 128 - r * Math.cos(a)]; };
+    st.render = function () {
+        g('clk-h').textContent = String(st.h);
+        g('clk-m').textContent = String(st.m).padStart(2, '0');
+        g('clk-h').style.background = st.mode === 'hour' ? 'rgba(174,203,250,.28)' : 'transparent';
+        g('clk-m').style.background = st.mode === 'min' ? 'rgba(174,203,250,.28)' : 'transparent';
+        g('clk-am').style.background = st.ap === 'AM' ? 'rgba(174,203,250,.28)' : 'transparent';
+        g('clk-pm').style.background = st.ap === 'PM' ? 'rgba(174,203,250,.28)' : 'transparent';
+        g('clk-am').style.opacity = st.ap === 'AM' ? '1' : '.6'; g('clk-pm').style.opacity = st.ap === 'PM' ? '1' : '.6';
+        const hour = st.mode === 'hour';
+        const cur = hour ? st.h : st.m, per = hour ? 12 : 60;
+        const [sx, sy] = pos(cur, per, 98);
+        let svg = '<circle cx="128" cy="128" r="124" fill="#4c4c52"/>';
+        svg += '<line x1="128" y1="128" x2="' + sx + '" y2="' + sy + '" stroke="#aecbfa" stroke-width="2.2"/><circle cx="128" cy="128" r="4.5" fill="#aecbfa"/>';
+        svg += '<circle cx="' + sx + '" cy="' + sy + '" r="21" fill="#aecbfa"/>';
+        const marks = hour ? [1,2,3,4,5,6,7,8,9,10,11,12] : [0,5,10,15,20,25,30,35,40,45,50,55];
+        marks.forEach(v => {
+            const [x, y] = pos(v, per, 98), sel = hour ? v === st.h : v === st.m;
+            svg += '<text x="' + x + '" y="' + (y + 6) + '" text-anchor="middle" font-size="19" font-family="inherit" fill="' + (sel ? '#1f2a44' : '#e8e8ee') + '" style="pointer-events:none;">' + (hour ? v : String(v).padStart(2, '0')) + '</text>';
+        });
+        if (!hour && st.m % 5 !== 0) svg += '<text x="' + sx + '" y="' + (sy + 6) + '" text-anchor="middle" font-size="19" fill="#1f2a44" style="pointer-events:none;">' + String(st.m).padStart(2, '0') + '</text>';
+        g('clk-face').innerHTML = svg;
+    };
+    st.pickAt = function (clientX, clientY, final) {
+        const r = g('clk-face').getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        let a = Math.atan2(clientX - cx, -(clientY - cy)) * 180 / Math.PI; if (a < 0) a += 360;
+        if (st.mode === 'hour') { st.h = Math.round(a / 30) % 12 || 12; }
+        else { st.m = Math.round(a / 6) % 60; }
+        if (final && st.mode === 'hour') st.mode = 'min';
+        st.render();
+    };
+    const face = g('clk-face'); let down = false;
+    face.addEventListener('pointerdown', e => { down = true; try { face.setPointerCapture(e.pointerId); } catch (x) {} st.pickAt(e.clientX, e.clientY, false); });
+    face.addEventListener('pointermove', e => { if (down) st.pickAt(e.clientX, e.clientY, false); });
+    face.addEventListener('pointerup', e => { if (down) { down = false; st.pickAt(e.clientX, e.clientY, true); } });
+    g('clk-h').onclick = () => { st.mode = 'hour'; st.render(); };
+    g('clk-m').onclick = () => { st.mode = 'min'; st.render(); };
+    g('clk-am').onclick = () => { st.ap = 'AM'; st.render(); };
+    g('clk-pm').onclick = () => { st.ap = 'PM'; st.render(); };
+    const close = () => { wrap.style.display = 'none'; st.inp = null; };
+    g('clk-cancel').onclick = close;
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+    g('clk-clear').onclick = () => { if (st.inp) st.inp.value = ''; close(); };
+    g('clk-set').onclick = () => {
+        if (st.inp) { let h = st.h % 12; if (st.ap === 'PM') h += 12; st.inp.value = String(h).padStart(2, '0') + ':' + String(st.m).padStart(2, '0'); }
+        close();
+    };
+    return st;
+}
+function clkOpen(inp) {
+    if (!_clk) _clk = clkBuild();
+    const m = /^(\d{1,2}):(\d{2})/.exec(inp.value || '');
+    let h24, mi;
+    if (m) { h24 = parseInt(m[1], 10); mi = parseInt(m[2], 10); } else { const n = new Date(); h24 = n.getHours(); mi = n.getMinutes(); }
+    _clk.h = h24 % 12 || 12; _clk.m = mi; _clk.ap = h24 >= 12 ? 'PM' : 'AM'; _clk.mode = 'hour'; _clk.inp = inp;
+    _clk.render(); _clk.el.style.display = 'flex';
+}
+function initClockPickers(ids) {
+    ids.forEach(function (id) {
+        const inp = document.getElementById(id); if (!inp || inp.dataset.clk) return;
+        inp.dataset.clk = '1'; inp.type = 'hidden';
+        let val = '';
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'clk-btn';
+        btn.style.cssText = 'display:block;width:100%;box-sizing:border-box;text-align:left;padding:13px 14px;margin:0;border:1.5px solid var(--border,#e2e8f0);border-radius:12px;background:#fff;color:var(--dark,#0f172a);font:inherit;font-weight:600;cursor:pointer;';
+        inp.parentNode.insertBefore(btn, inp.nextSibling);
+        const paint = () => { btn.textContent = val ? ('\u{1F551} ' + time12(val)) : '\u{1F551} Select time'; btn.style.color = val ? 'var(--dark,#0f172a)' : '#94a3b8'; };
+        paint();
+        btn.addEventListener('click', () => clkOpen(inp));
+        Object.defineProperty(inp, 'value', { configurable: true, get: function () { return val; }, set: function (v) { val = v ? String(v) : ''; paint(); try { inp.dispatchEvent(new Event('change')); } catch (e) {} } });
+    });
+}
+
+(function () {
+    const go = () => initClockPickers(['wh-open-time', 'wh-close-time']);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
+})();
+
 function saOpenTicket(ticketId, type, skipSave){
     saCurrentModalType = type; saCurrentModalId = ticketId;
     if (!skipSave) { saReplyFileData = []; }
