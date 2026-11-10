@@ -5626,39 +5626,6 @@ function time12(t) {
     let h = parseInt(m[1], 10); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
     return h + ':' + m[2] + ' ' + ap;
 }
-function initTime12Pickers(ids) {
-    ids.forEach(function (id) {
-        const inp = document.getElementById(id); if (!inp || inp.dataset.t12) return;
-        inp.dataset.t12 = '1'; inp.type = 'hidden';
-        let val = '';
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:flex;gap:6px;align-items:center;';
-        const mk = (opts) => { const s = document.createElement('select'); s.style.cssText = 'flex:1;min-width:0;margin:0;padding:10px 6px;'; s.innerHTML = opts; return s; };
-        let ho = '<option value="">Hr</option>', mo = '<option value="">Min</option>';
-        for (let h = 1; h <= 12; h++) ho += '<option value="' + h + '">' + h + '</option>';
-        for (let m = 0; m < 60; m++) mo += '<option value="' + String(m).padStart(2, '0') + '">' + String(m).padStart(2, '0') + '</option>';
-        const sh = mk(ho), sm = mk(mo), sp = mk('<option value="">--</option><option value="AM">AM</option><option value="PM">PM</option>');
-        wrap.appendChild(sh); wrap.appendChild(sm); wrap.appendChild(sp);
-        inp.parentNode.insertBefore(wrap, inp.nextSibling);
-        const sync = () => {
-            const m = /^(\d{1,2}):(\d{2})/.exec(val);
-            if (!m) { sh.value = ''; sm.value = ''; sp.value = ''; return; }
-            let h = parseInt(m[1], 10); sp.value = h >= 12 ? 'PM' : 'AM'; sh.value = String(h % 12 || 12); sm.value = m[2];
-        };
-        const read = () => {
-            if (!sh.value || !sm.value || !sp.value) { val = ''; return; }
-            let h = parseInt(sh.value, 10) % 12; if (sp.value === 'PM') h += 12;
-            val = String(h).padStart(2, '0') + ':' + sm.value;
-        };
-        [sh, sm, sp].forEach(el => el.addEventListener('change', read));
-        Object.defineProperty(inp, 'value', { configurable: true, get: function () { return val; }, set: function (v) { val = v ? String(v) : ''; sync(); } });
-    });
-}
-
-(function () {
-    const go = () => initTime12Pickers(['wh-open-time', 'wh-close-time']);
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
-})();
 
 function saOpenTicket(ticketId, type, skipSave){
     saCurrentModalType = type; saCurrentModalId = ticketId;
